@@ -1,0 +1,150 @@
+import socket
+from threading import *
+
+_map = {}
+
+
+class _Client(Thread):
+    def __init__(self, conn, addr):
+        Thread.__init__(self)
+
+        self.conn = conn
+        self.addr = addr
+
+        self.data = None
+        self.tosend = None
+
+        self.active = False
+        self.stepping = False
+
+    def step(self):
+        self.stepping = True
+
+    def isActive(self):
+        return self.active
+
+    def react(self, data):
+        global _map
+
+        tosend = ''
+
+        if 'cmd' in data:
+            print(self.addr, ' : ', data)
+
+            d = data.replace('cmd', '')
+            if 'set' in d:
+                cmd = d.replace('set', '')
+                try:
+                    it = eval(cmd)
+                    for block in it:
+                        _map[block[0], block[1]] = block[2]
+                except:
+                    pass
+            elif 'get' in d:
+                cmd = d.replace('get', '')
+                try:
+                    it = eval(cmd)
+                    tosend = []
+                    for block in it:
+                        tosend.append((block[0], block[1], _map[block[0], block[1]]))
+                except:
+                    pass
+
+        tosend = str(tosend)
+        if len(tosend) < 50:
+            print(self.addr, 'Server response:', tosend)
+        self.tosend = tosend
+
+    def run(self):
+        global _map
+
+        while self.stepping:
+            self.active = True
+
+            try:
+                self.data = self.conn.recv(131072).decode('utf-8')
+            except socket.error:
+                pass
+
+            try:
+                self.react(self.data)
+            except:
+                pass
+
+            try:
+                if self.tosend is not None:
+                    self.conn.send(self.tosend.encode('utf-8'))
+            except socket.error:
+                pass
+
+            self.active = False
+            self.stepping = False
+
+
+class _Server:
+    def __init__(self, ip, port):
+        global _map
+
+        self.ip = ip
+        self.port = port
+
+        self.binded = False
+
+        self.s = socket.socket()
+        self.s.setblocking(False)
+
+        self.connections = []
+        self.clients = {}
+
+        for x in range(48):
+            for y in range(24):
+                _map[x, y] = (255, 255, 255)
+
+        self.bind()
+        while not self.binded:
+            self.bind()
+
+        print('Binded!')
+
+        while True:
+            try:
+                conn, addr = self.s.accept()
+                print(conn, addr)
+
+                if not (conn, addr) in self.connections:
+                    print('New connection:', addr)
+                    self.connections.append((conn, addr))
+                    num = self.connections.index((conn, addr))
+                    self.clients[num] = _Client(conn, addr)
+                    self.clients[num].start()
+
+                for thr in self.clients:
+                    thread = self.clients[thr]
+                    if not thread.isActive():
+                        thread.step()
+                        while thread.isActive():
+                            pass
+            except:
+                pass
+
+    def bind(self):
+        try:
+            self.s.bind((self.ip, self.port))
+            self.binded = True
+        except socket.error:
+            pass
+
+
+if __name__ == '__main__':
+    ipp = input('IP: ')
+    if ipp == '':
+        ipp = socket.gethostbyname(socket.gethostname())
+    portt = input('PORT: ')
+    if portt == '':
+        portt = 2535
+    else:
+        portt = int(portt)
+
+    print('IP:', ipp, 'PORT:', portt)
+
+    server = _Server(ipp, portt)
